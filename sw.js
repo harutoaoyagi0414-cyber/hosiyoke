@@ -1,6 +1,6 @@
 // ほしよけ！ のオフライン用 service worker
-// bfb13f0f53 は build.ps1 がゲームの中身から作った版番号に置きかえる
-const CACHE = 'hoshiyoke-bfb13f0f53';
+// 1a3adb0eb4 は build.ps1 がゲームの中身から作った版番号に置きかえる
+const CACHE = 'hoshiyoke-1a3adb0eb4';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', e => {

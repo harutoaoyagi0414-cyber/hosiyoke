@@ -73,7 +73,14 @@ const sfx = {
   milestone(){ tone(880, 0, 0.1, 'square', 0.06); tone(1319, 0.08, 0.15, 'square', 0.06); },
   gameover() { [523, 440, 349, 262].forEach((f, i) => tone(f, i*0.14, 0.22, 'triangle', 0.2));
                tone(300, 0, 0.5, 'sawtooth', 0.05, 60); },
-  best()     { [784, 988, 1175, 1568].forEach((f, i) => tone(f, 0.65 + i*0.09, 0.2, 'triangle', 0.15)); }
+  best()     { [784, 988, 1175, 1568].forEach((f, i) => tone(f, 0.65 + i*0.09, 0.2, 'triangle', 0.15)); },
+  boss()     { for (let i = 0; i < 4; i++) { tone(520, i*0.36, 0.18, 'sawtooth', 0.07, 780); tone(780, i*0.36 + 0.18, 0.18, 'sawtooth', 0.07, 520); } },
+  shot()     { tone(900, 0, 0.08, 'square', 0.035, 380); },
+  warn()     { tone(1500, 0, 0.05, 'sine', 0.06); tone(1500, 0.1, 0.05, 'sine', 0.06); },
+  laser()    { tone(1400, 0, 0.45, 'sawtooth', 0.06, 180); },
+  gift()     { [784, 1047, 1319, 1568, 2093].forEach((f, i) => tone(f, i*0.06, 0.2, 'triangle', 0.15)); tone(300, 0, 0.4, 'sine', 0.08, 900); },
+  guard()    { tone(220, 0, 0.25, 'square', 0.08, 880); tone(1760, 0.05, 0.3, 'sine', 0.12, 660); },
+  clear()    { [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => tone(f, i*0.1, 0.18, 'triangle', 0.17)); }
 };
 function toggleMute() {
   muted = !muted;
@@ -103,15 +110,27 @@ function drawMuteBtn() {
 function reset() {
   unlockAudio(); sfx.start();
   player = { x: W/2, y: H-40, r: 16 };
+  boss = null; bossDone = false; bullets = []; lasers = []; bgFade = 0; shield = false; invul = 0;
   stars = []; score = 0; announceT = 0; speed = 2.5; accel = 0.002; sinceReset = 0; redCount = 0; t = 0; over = false; running = true;
 }
 function spawn() {
   const red = Math.random() < 0.06;
   if (red) { const r = 14; stars.push({ kind: 'star', x: r + Math.random()*(W-2*r), y: -r, r, v: 2.5, rot: 0, red }); return; }
-  // スコアで新しい落下物が出てくる（3000 宇宙人 / 6000 三日月 / 10000 隕石）
+  // ボス戦のあとは、たまにプレゼント（とると1回ガード）
+  if (bossDone && Math.random() < 0.01) {
+    const r = 15; stars.push({ kind: 'gift', gift: true, x: r + Math.random()*(W-2*r), y: -r, r, v: 2.5, rot: 0, red: false, ph: Math.random()*6 });
+    return;
+  }
+  // スコアで新しい落下物が出てくる（3000 宇宙人 / 6000 三日月 / 10000 隕石 / 12000 光る星 / 15000 宇宙船）
   let kind = 'star', r = 8 + Math.random()*12, v = speed + Math.random()*2;
   const roll = Math.random();
-  if (score >= 10000 && roll < 0.10)      { kind = 'meteor'; r = 34; v = speed + Math.random(); }
+  if (score >= 15000 && Math.random() < 0.08) {
+    const r = 24, bx = 90 + Math.random()*(W - 180);
+    stars.push({ kind: 'ship', x: bx, bx, y: -r, r, v: speed*0.8 + Math.random(), rot: 0, red: false, ph: Math.random()*6 });
+    return;
+  }
+  if (score >= 12000 && Math.random() < 0.10) { kind = 'glow'; r = 17; }
+  else if (score >= 10000 && roll < 0.10) { kind = 'meteor'; r = 34; v = speed + Math.random(); }
   else if (score >= 6000 && roll < 0.25)  { kind = 'moon';   r = 22; }
   else if (score >= 3000 && roll < 0.45)  { kind = 'alien';  r = 11; }
   stars.push({ kind, x: r + Math.random()*(W-2*r), y: -r, r, v, rot: Math.random()*6, red: false, ph: Math.random()*6 });
@@ -143,6 +162,54 @@ const meteorSprite = (() => {
   for (const [x, y, r] of [[-12, -6, 7], [10, 8, 9], [8, -15, 5], [-8, 16, 5]]) { g.beginPath(); g.arc(x, y, r, 0, Math.PI*2); g.fill(); }
   return c;
 })();
+function drawGlow(s) {
+  // 光る星：ふくらんだり縮んだりしながら、まわりに光の十字がまわる
+  const pulse = 1 + Math.sin(ft*0.2 + s.ph)*0.15, r = s.r * pulse;
+  ctx.save(); ctx.translate(s.x, s.y);
+  const halo = ctx.createRadialGradient(0, 0, r*0.3, 0, 0, r*2.4);
+  halo.addColorStop(0, 'rgba(190,250,255,0.55)'); halo.addColorStop(1, 'rgba(190,250,255,0)');
+  ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(0, 0, r*2.4, 0, Math.PI*2); ctx.fill();
+  ctx.save(); ctx.rotate(ft*0.03);
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  const L = r * (1.9 + Math.sin(ft*0.3 + s.ph)*0.3);
+  ctx.beginPath(); ctx.moveTo(-L, 0); ctx.lineTo(L, 0); ctx.moveTo(0, -L); ctx.lineTo(0, L); ctx.stroke();
+  ctx.restore();
+  ctx.rotate(s.rot); ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = i*Math.PI/5 - Math.PI/2, rr = i%2 ? r*0.45 : r;
+    ctx.lineTo(Math.cos(a)*rr, Math.sin(a)*rr);
+  }
+  ctx.closePath(); ctx.shadowColor = '#bffaff'; ctx.shadowBlur = 20;
+  ctx.fillStyle = '#f2feff'; ctx.fill();
+  ctx.restore();
+}
+function drawShip(s) {
+  // 宇宙船：左右にふらふらしながら降りてくる
+  ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(Math.cos(s.y*0.03 + s.ph)*0.18);
+  const r = s.r;
+  // 下に出るビーム
+  const beam = ctx.createLinearGradient(0, 0, 0, r*2.2);
+  beam.addColorStop(0, 'rgba(255,240,140,0.45)'); beam.addColorStop(1, 'rgba(255,240,140,0)');
+  ctx.fillStyle = beam;
+  ctx.beginPath(); ctx.moveTo(-r*0.35, r*0.2); ctx.lineTo(r*0.35, r*0.2); ctx.lineTo(r*0.8, r*2.2); ctx.lineTo(-r*0.8, r*2.2); ctx.closePath(); ctx.fill();
+  // ドーム
+  ctx.fillStyle = 'rgba(150,240,255,0.8)';
+  ctx.beginPath(); ctx.ellipse(0, -r*0.25, r*0.5, r*0.45, 0, Math.PI, 0); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.beginPath(); ctx.ellipse(-r*0.18, -r*0.45, r*0.12, r*0.08, -0.5, 0, Math.PI*2); ctx.fill();
+  // 本体
+  const body = ctx.createLinearGradient(0, -r*0.3, 0, r*0.35);
+  body.addColorStop(0, '#e9eef8'); body.addColorStop(1, '#8a93ad');
+  ctx.fillStyle = body;
+  ctx.beginPath(); ctx.ellipse(0, 0, r*1.1, r*0.36, 0, 0, Math.PI*2); ctx.fill();
+  // ライト（順番に光る）
+  for (let i = 0; i < 5; i++) {
+    const on = (Math.floor(ft/8) + i) % 3 === 0;
+    ctx.fillStyle = on ? '#ffe27a' : '#5b6380';
+    ctx.beginPath(); ctx.arc((i - 2)*r*0.4, r*0.08, r*0.09, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
 function drawAlien(s) {
   const r = s.r, wob = Math.sin(ft*0.15 + s.ph)*0.25;
   ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(wob);
@@ -155,14 +222,22 @@ function drawAlien(s) {
   ctx.fillStyle = '#7dff8a';
   ctx.beginPath(); ctx.ellipse(0, 0, r, r*0.9, 0, 0, Math.PI*2); ctx.fill();
   // おおきな目
-  ctx.fillStyle = '#10142e';
+  ctx.fillStyle = s.angry ? '#8a0020' : '#10142e';
   ctx.beginPath(); ctx.ellipse(-r*0.38, -r*0.05, r*0.26, r*0.34, -0.3, 0, Math.PI*2); ctx.fill();
   ctx.beginPath(); ctx.ellipse(r*0.38, -r*0.05, r*0.26, r*0.34, 0.3, 0, Math.PI*2); ctx.fill();
   ctx.fillStyle = '#fff';
   ctx.beginPath(); ctx.arc(-r*0.32, -r*0.18, r*0.09, 0, Math.PI*2); ctx.arc(r*0.44, -r*0.18, r*0.09, 0, Math.PI*2); ctx.fill();
   // くち
   ctx.strokeStyle = '#10142e'; ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.arc(0, r*0.4, r*0.18, 0.2*Math.PI, 0.8*Math.PI); ctx.stroke();
+  if (s.angry) {
+    // ボス：おこった眉毛と、への字ぐち
+    ctx.lineWidth = r*0.1; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-r*0.65, -r*0.5); ctx.lineTo(-r*0.15, -r*0.32); ctx.moveTo(r*0.65, -r*0.5); ctx.lineTo(r*0.15, -r*0.32); ctx.stroke();
+    ctx.lineWidth = r*0.06;
+    ctx.beginPath(); ctx.arc(0, r*0.62, r*0.2, 1.2*Math.PI, 1.8*Math.PI); ctx.stroke();
+  } else {
+    ctx.beginPath(); ctx.arc(0, r*0.4, r*0.18, 0.2*Math.PI, 0.8*Math.PI); ctx.stroke();
+  }
   ctx.restore();
 }
 function drawMoon(s) {
@@ -187,10 +262,210 @@ function drawObj(s) {
   if (s.kind === 'alien') drawAlien(s);
   else if (s.kind === 'moon') drawMoon(s);
   else if (s.kind === 'meteor') drawMeteor(s);
+  else if (s.kind === 'glow') drawGlow(s);
+  else if (s.kind === 'ship') drawShip(s);
+  else if (s.kind === 'gift') drawGift(s);
   else drawStar(s.x, s.y, s.r, s.rot, s.red);
 }
+function drawGift(s) {
+  const r = s.r;
+  ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(Math.sin(ft*0.08 + s.ph)*0.2);
+  // まわりのキラキラ
+  ctx.shadowColor = '#fff3a0'; ctx.shadowBlur = 16 + Math.sin(ft*0.2)*6;
+  // 箱
+  ctx.fillStyle = '#ff6fa8'; ctx.fillRect(-r, -r*0.6, r*2, r*1.6);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#ff9cc4'; ctx.fillRect(-r*1.1, -r*0.85, r*2.2, r*0.5);
+  // リボン
+  ctx.fillStyle = '#ffe27a';
+  ctx.fillRect(-r*0.18, -r*0.85, r*0.36, r*1.85);
+  ctx.beginPath(); ctx.ellipse(-r*0.4, -r*1.05, r*0.4, r*0.24, -0.5, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(r*0.4, -r*1.05, r*0.4, r*0.24, 0.5, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+  cuteStar(s.x + Math.cos(ft*0.1 + s.ph)*r*1.6, s.y + Math.sin(ft*0.1 + s.ph)*r*1.4, 4, ft*0.1, '#fff3a0', 0.9);
+}
+// ---- ガード（プレゼントでもらえる） ----
+let shield = false, invul = 0, flashText = 'スピードリセット！';
+function drawAura() {
+  const p = player, k = Math.sin(ft*0.15);
+  ctx.save();
+  const g = ctx.createRadialGradient(p.x, p.y, p.r*0.8, p.x, p.y, p.r*2.2 + k*3);
+  g.addColorStop(0, 'rgba(255,230,120,0.65)'); g.addColorStop(0.6, 'rgba(255,140,200,0.35)'); g.addColorStop(1, 'rgba(255,140,200,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, p.r*2.2 + k*3, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,240,170,0.9)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(p.x, p.y, p.r*1.45 + k*2, 0, Math.PI*2); ctx.stroke();
+  for (let i = 0; i < 3; i++) {
+    const a = ft*0.06 + i*Math.PI*2/3;
+    cuteStar(p.x + Math.cos(a)*p.r*1.9, p.y + Math.sin(a)*p.r*1.9, 4, a, '#fff3a0', 1);
+  }
+  ctx.restore();
+}
+
+// ---- 13000点からの宇宙の背景 ----
+let bgFade = 0;
+const nebula = (() => {
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+  const base = g.createLinearGradient(0, 0, 0, H);
+  base.addColorStop(0, '#0a0624'); base.addColorStop(0.55, '#1a0f45'); base.addColorStop(1, '#2b0f3d');
+  g.fillStyle = base; g.fillRect(0, 0, W, H);
+  for (const [x, y, r, col] of [[90, 130, 190, 'rgba(160,70,255,0.35)'], [330, 300, 210, 'rgba(255,90,180,0.25)'],
+                                 [140, 470, 180, 'rgba(40,200,255,0.22)'], [300, 60, 140, 'rgba(80,120,255,0.25)']]) {
+    const gr = g.createRadialGradient(x, y, 0, x, y, r);
+    gr.addColorStop(0, col); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  }
+  // 右はしのわっか付き惑星
+  const px = W + 8, py = 230, pr = 58;
+  const pg = g.createRadialGradient(px - 25, py - 25, 5, px, py, pr);
+  pg.addColorStop(0, '#ffd1a8'); pg.addColorStop(1, '#c0567a');
+  g.globalAlpha = 0.5;
+  g.fillStyle = pg; g.beginPath(); g.arc(px, py, pr, 0, Math.PI*2); g.fill();
+  g.strokeStyle = 'rgba(255,230,200,0.7)'; g.lineWidth = 5;
+  g.beginPath(); g.ellipse(px, py, pr*1.7, pr*0.35, -0.35, 0, Math.PI*2); g.stroke();
+  return c;
+})();
+const bgDots = Array.from({length: 70}, () => ({
+  x: Math.random()*W, y: Math.random()*H, s: 0.5 + Math.random()*1.6, v: 0.1 + Math.random()*0.5, ph: Math.random()*6
+}));
+function drawSpaceBg() {
+  ctx.save(); ctx.globalAlpha = bgFade;
+  ctx.drawImage(nebula, 0, 0);
+  // ゆっくり流れる、またたく星
+  for (const d of bgDots) {
+    const y = (d.y + ft*d.v) % H;
+    ctx.globalAlpha = bgFade * (0.4 + 0.6*Math.abs(Math.sin(ft*0.04 + d.ph)));
+    ctx.fillStyle = '#fff'; ctx.fillRect(d.x, y, d.s, d.s);
+  }
+  // ときどき流れ星
+  const cyc = Math.floor(ft / 200), k = ft % 200;
+  if (k < 36) {
+    const sx = (cyc*137) % (W - 100) + 120, sy = (cyc*71) % 160 + 20, p = k/36;
+    const x = sx - p*160, y = sy + p*90;
+    const gr = ctx.createLinearGradient(x, y, x + 60, y - 34);
+    gr.addColorStop(0, 'rgba(255,255,255,0.9)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.globalAlpha = bgFade * (1 - p);
+    ctx.strokeStyle = gr; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 60, y - 34); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ---- 17000点：ボス戦（15秒よけきる） ----
+const BOSS_FIGHT = 15 * 60, BOSS_BONUS = 2000;
+let boss = null, bossDone = false, bullets = [], lasers = [];
+function startBoss() {
+  boss = { phase: 'enter', t: 0, x: W/2, y: -90, atk: 0 };
+  announce = 'ボス襲来！！'; announceT = 150; sfx.boss();
+}
+function bossAttack(kind, prog) {
+  const mx = boss.x, my = boss.y + 30;
+  if (kind === 0) {
+    // ねらいうち 3連発
+    const sp = 4 + 2*prog, a = Math.atan2(player.y - my, player.x - mx);
+    for (let i = 0; i < 3; i++) bullets.push({ x: mx, y: my, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp, r: 8, wait: i*9 });
+    sfx.shot();
+  } else if (kind === 1) {
+    // おうぎ形にばらまき
+    const n = 7 + Math.round(4*prog), sp = 3.2 + 1.5*prog;
+    for (let i = 0; i < n; i++) {
+      const a = Math.PI*(0.22 + 0.56*i/(n - 1));
+      bullets.push({ x: mx, y: my, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp, r: 7, wait: 0 });
+    }
+    sfx.shot();
+  } else {
+    // 予告線のあとにビーム（後半は2本）
+    lasers.push({ x: player.x, warn: 50, fire: 28 });
+    if (prog > 0.5) lasers.push({ x: Math.max(20, Math.min(W - 20, player.x + (Math.random() < 0.5 ? -1 : 1)*(90 + Math.random()*60))), warn: 50, fire: 28 });
+    sfx.warn();
+  }
+}
+function updateBoss() {
+  boss.t++;
+  if (boss.phase === 'enter') {
+    boss.y = -90 + 185 * Math.min(1, boss.t / 90);
+    if (boss.t >= 90) { boss.phase = 'fight'; boss.t = 0; }
+  } else if (boss.phase === 'fight') {
+    boss.x = W/2 + Math.sin(boss.t*0.025)*120;
+    boss.y = 95 + Math.sin(boss.t*0.05)*8;
+    const prog = boss.t / BOSS_FIGHT;
+    const period = Math.round(95 - 40*prog);   // 時間がたつほど攻撃が速くなる
+    if (boss.t % period === 0) bossAttack(boss.atk++ % 3, prog);
+    if (boss.t >= BOSS_FIGHT) {
+      boss.phase = 'leave'; boss.t = 0; lasers = [];
+      score += BOSS_BONUS;
+      announce = `ボスをしりぞけた！ +${BOSS_BONUS}`; announceT = 180; sfx.clear();
+    }
+  } else {
+    boss.y -= 3; boss.x += Math.sin(boss.t*0.2)*4;
+    if (boss.y < -130) { boss = null; bossDone = true; }
+  }
+  for (const b of bullets) { if (b.wait > 0) { b.wait--; continue; } b.x += b.vx; b.y += b.vy; }
+  bullets = bullets.filter(b => b.y < H + 20 && b.y > -40 && b.x > -20 && b.x < W + 20);
+  for (const L of lasers) {
+    if (L.warn > 0) { L.warn--; if (L.warn === 0) sfx.laser(); }
+    else L.fire--;
+  }
+  lasers = lasers.filter(L => L.warn > 0 || L.fire > 0);
+}
+function bossHit() {
+  for (const b of bullets) if (b.wait === 0 && Math.hypot(b.x - player.x, b.y - player.y) < b.r*0.85 + player.r*0.8) return true;
+  for (const L of lasers) if (L.warn === 0 && L.fire > 0 && Math.abs(L.x - player.x) < 12 + player.r*0.7) return true;
+  return false;
+}
+function drawBoss() {
+  const { x, y } = boss;
+  ctx.save();
+  // 円盤
+  const body = ctx.createLinearGradient(0, y + 10, 0, y + 50);
+  body.addColorStop(0, '#d9def0'); body.addColorStop(1, '#5d6684');
+  ctx.fillStyle = body;
+  ctx.beginPath(); ctx.ellipse(x, y + 30, 92, 24, 0, 0, Math.PI*2); ctx.fill();
+  for (let i = 0; i < 7; i++) {
+    const on = (Math.floor(ft/6) + i) % 2 === 0;
+    ctx.fillStyle = on ? '#ff4d6d' : '#7a2236';
+    ctx.beginPath(); ctx.arc(x + (i - 3)*24, y + 36, 4.5, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+  // でか宇宙人
+  drawAlien({ x, y: y - 6, r: 44, ph: 0, angry: true });
+}
+function drawBossAttacks() {
+  for (const L of lasers) {
+    ctx.save();
+    if (L.warn > 0) {
+      ctx.globalAlpha = (Math.floor(L.warn / 5) % 2) ? 0.9 : 0.35;
+      ctx.strokeStyle = '#ff4d6d'; ctx.lineWidth = 2; ctx.setLineDash([10, 8]);
+      ctx.beginPath(); ctx.moveTo(L.x, boss ? boss.y + 40 : 0); ctx.lineTo(L.x, H); ctx.stroke();
+    } else {
+      const w = 26 * Math.min(1, L.fire / 8);
+      const g = ctx.createLinearGradient(L.x - w, 0, L.x + w, 0);
+      g.addColorStop(0, 'rgba(255,80,140,0)'); g.addColorStop(0.3, 'rgba(255,80,140,0.8)');
+      g.addColorStop(0.5, '#fff'); g.addColorStop(0.7, 'rgba(255,80,140,0.8)'); g.addColorStop(1, 'rgba(255,80,140,0)');
+      ctx.fillStyle = g; ctx.fillRect(L.x - w, boss ? boss.y + 30 : 0, w*2, H);
+    }
+    ctx.restore();
+  }
+  for (const b of bullets) {
+    if (b.wait > 0) continue;
+    ctx.save(); ctx.shadowColor = '#7dff8a'; ctx.shadowBlur = 14;
+    ctx.fillStyle = '#7dff8a'; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#eaffea'; ctx.beginPath(); ctx.arc(b.x, b.y, b.r*0.45, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+}
+function drawBossHud() {
+  if (!boss || boss.phase !== 'fight') return;
+  const left = Math.max(0, BOSS_FIGHT - boss.t);
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(20, 14, W - 80, 22);
+  ctx.fillStyle = '#ff4d6d'; ctx.fillRect(22, 16, (W - 84) * left / BOSS_FIGHT, 18);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(`ボス戦　のこり ${Math.ceil(left / 60)} 秒`, 20 + (W - 80)/2, 25);
+  ctx.restore();
+}
 // ---- 新しい落下物のお知らせ ----
-const UNLOCKS = [[3000, 'ちっちゃい宇宙人がくるよ！'], [6000, '三日月がふってくる！'], [10000, 'でっかい隕石だ！！']];
+const UNLOCKS = [[3000, 'ちっちゃい宇宙人がくるよ！'], [6000, '三日月がふってくる！'], [10000, 'でっかい隕石だ！！'],
+                 [12000, '光る星があらわれた！'], [13000, '宇宙の奥へ…！'], [15000, '宇宙船が飛んできた！']];
 let announce = '', announceT = 0;
 let flash = 0, accel = 0.002, sinceReset = 0, redCount = 0;
 function drawStar(x, y, r, rot, red) {
@@ -208,38 +483,71 @@ function update() {
   t++;
   const dir = (keys.ArrowRight?1:0) - (keys.ArrowLeft?1:0) + touchDir;
   player.x = Math.max(player.r, Math.min(W-player.r, player.x + dir*6));
-  sinceReset++;
-  if (t % Math.max(8, 30 - Math.floor(sinceReset/200)) === 0) spawn();
-  speed += accel;
-  for (const s of stars) { s.y += s.v; s.rot += 0.05; }
+  // ボス戦のあいだは落下物が止まり、加速もお休み
+  if (!boss) {
+    sinceReset++;
+    if (t % Math.max(8, 30 - Math.floor(sinceReset/200)) === 0) spawn();
+    speed += accel;
+  }
+  for (const s of stars) {
+    s.y += s.v; s.rot += 0.05;
+    if (s.kind === 'ship') s.x = Math.max(s.r*1.1, Math.min(W - s.r*1.1, s.bx + Math.sin(s.y*0.03 + s.ph)*70));
+  }
   stars = stars.filter(s => s.y < H + s.r && !s.hit);
   score++;
+  if (score >= 13000 && bgFade < 1) bgFade = Math.min(1, bgFade + 1/120);
+  if (score >= 17000 && !boss && !bossDone) startBoss();
+  if (boss) {
+    updateBoss();
+    if (bossHit()) { gameOver(); return; }
+  }
   const unlock = UNLOCKS.find(u => u[0] === score);
   if (unlock) { announce = unlock[1]; announceT = 150; sfx.unlock(); }
   else if (score % 1000 === 0) sfx.milestone();
   if (announceT > 0) announceT--;
   document.getElementById('score').textContent = score;
   if (flash > 0) flash--;
+  if (invul > 0) invul--;
   for (const s of stars) {
     // 三日月は欠けている部分があるので当たり判定を少し小さく
     const hitR = s.r * (s.kind === 'moon' ? 0.6 : 0.8);
     if (Math.hypot(s.x-player.x, s.y-player.y) < hitR + player.r*0.8) {
-      if (s.red) {
-        // 赤い星：速さをリセット
-        // 1回目は最初の1.5倍のペース、2回目からは取るたびにさらに1.1倍
-        redCount++;
-        speed = 2.5; accel = 0.002 * 1.5 * Math.pow(1.1, redCount - 1); sinceReset = 0; s.hit = true; flash = 40;
-        sfx.red();
-        for (const o of stars) if (!o.red) o.v = speed + Math.random()*2;
+      if (s.gift) {
+        // プレゼント：1回ガードできるオーラをまとう
+        s.hit = true; shield = true; flashText = 'ガードゲット！'; flash = 50; sfx.gift();
         continue;
       }
-      running = false; over = true; touchDir = 0;
-      sfx.gameover();
-      if (score > best) { sfx.best(); best = score; try { localStorage.setItem('hoshiyoke-best', best); } catch(e) {} }
-      document.getElementById('best').textContent = best;
+      if (s.red) {
+        s.hit = true; flash = 40; sfx.red();
+        if (score >= 20000) {
+          // 20000点から：リセットではなく 30% 減速
+          speed *= 0.7; flashText = 'スピード30%ダウン！';
+          for (const o of stars) if (!o.red && !o.gift) o.v *= 0.7;
+        } else {
+          // 赤い星：速さをリセット
+          // 1回目は最初の1.5倍のペース、2回目からは取るたびにさらに1.1倍
+          redCount++;
+          speed = 2.5; accel = 0.002 * 1.5 * Math.pow(1.1, redCount - 1); sinceReset = 0; flashText = 'スピードリセット！';
+          for (const o of stars) if (!o.red && !o.gift) o.v = speed + Math.random()*2;
+        }
+        continue;
+      }
+      if (invul > 0) continue;
+      if (shield) {
+        // ガード：当たったものを消して、少しのあいだ無敵
+        shield = false; s.hit = true; invul = 60; flashText = 'ガード！'; flash = 40; sfx.guard();
+        continue;
+      }
+      gameOver();
       break;
     }
   }
+}
+function gameOver() {
+  running = false; over = true; touchDir = 0;
+  sfx.gameover();
+  if (score > best) { sfx.best(); best = score; try { localStorage.setItem('hoshiyoke-best', best); } catch(e) {} }
+  document.getElementById('best').textContent = best;
 }
 // ---- 待機画面 ----
 let ft = 0;
@@ -337,7 +645,11 @@ function drawTitle() {
 function draw() {
   ctx.clearRect(0,0,W,H);
   if (!running && !over) { drawTitle(); return; }
-  if (player) {
+  if (bgFade > 0) drawSpaceBg();
+  if (boss) drawBoss();
+  drawBossAttacks();
+  if (player && shield && running) drawAura();
+  if (player && !(invul > 0 && Math.floor(invul / 5) % 2)) {
     ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI*2);
     ctx.fillStyle = over ? '#ff5a5a' : '#5ad1ff'; ctx.fill();
     ctx.fillStyle = '#0b1026';
@@ -353,9 +665,10 @@ function draw() {
     ctx.strokeText(announce, 0, 0); ctx.fillStyle = '#7dff8a'; ctx.fillText(announce, 0, 0);
     ctx.restore(); ctx.fillStyle = '#fff';
   }
+  drawBossHud();
   if (flash > 0 && running) {
     ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = '#ff8fa3';
-    ctx.fillText('スピードリセット！', W/2, 60); ctx.fillStyle = '#fff';
+    ctx.fillText(flashText, W/2, 60); ctx.fillStyle = '#fff';
   }
   if (!running) {
     ctx.font = 'bold 32px sans-serif';
